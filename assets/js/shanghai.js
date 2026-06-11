@@ -232,29 +232,31 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+function makePlaceholder(name) {
+  const colors = ["#c0392b","#e67e22","#2980b9","#27ae60","#8e44ad","#d35400","#16a085","#2c3e50"];
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 200;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = colors[name.length % colors.length];
+  ctx.fillRect(0, 0, 256, 200);
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 24px 'PingFang SC', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(name, 128, 100);
+  return c;
+}
+
 function loadImage(src) {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => {
-      // 图片加载失败时生成彩色占位图
-      const c = document.createElement("canvas");
-      c.width = 256;
-      c.height = 200;
-      const ctx = c.getContext("2d");
-      // 随机柔和颜色
-      const colors = ["#c0392b","#e67e22","#2980b9","#27ae60","#8e44ad","#d35400","#16a085","#2c3e50"];
-      const color = colors[src.length % colors.length];
-      ctx.fillStyle = color;
-      ctx.fillRect(0, 0, 256, 200);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 24px 'PingFang SC', sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const name = src.split("/").pop().replace(/\.\w+$/, "");
-      ctx.fillText(name, 128, 100);
-      resolve(c);
-    };
+    let resolved = false;
+    const done = (result) => { if (!resolved) { resolved = true; resolve(result); } };
+    img.onload = () => done(img);
+    img.onerror = () => done(makePlaceholder(src.split("/").pop().replace(/\.\w+$/, "")));
+    // 5秒超时，防止图片加载卡死
+    setTimeout(() => done(makePlaceholder(src.split("/").pop().replace(/\.\w+$/, ""))), 5000);
     img.src = src;
   });
 }
@@ -639,15 +641,27 @@ SPOTS.forEach((s) => {
 /* ── 启动 ───────────────────────────────────────── */
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
+function showError(msg) {
+  const el = document.getElementById("loading") || document.body;
+  el.innerHTML = `<div style="color:#c03f2e;padding:40px;text-align:center;font-size:16px;line-height:2">
+    <div style="font-size:48px;margin-bottom:12px">⚠</div>
+    <div>地图加载失败</div>
+    <div style="font-size:13px;color:#6b5232;margin-top:8px;word-break:break-all">${msg}</div>
+    <div style="font-size:12px;color:#8a6f4d;margin-top:20px">请确保通过 HTTP 服务器打开此页面</div>
+  </div>`;
+}
+
 async function init() {
   const res = await fetch("assets/data/shanghai.json");
+  if (!res.ok) throw new Error(`GeoJSON 加载失败: ${res.status}`);
   const geojson = await res.json();
   buildDistricts(geojson);
   buildMountains();
   buildRivers();
   await buildSpots();
 
-  document.getElementById("loading").classList.add("fade");
+  const ld = document.getElementById("loading");
+  if (ld) ld.classList.add("fade");
 
   // 开场动画
   camera.position.set(0, 40, 190);
@@ -659,6 +673,15 @@ async function init() {
     toTarget: new THREE.Vector3(0, 0, 6)
   };
 }
+
+// 安全超时：最多等 15 秒强制隐藏加载层
+setTimeout(() => {
+  const ld = document.getElementById("loading");
+  if (ld && !ld.classList.contains("fade")) {
+    ld.classList.add("fade");
+    console.warn("init timeout - forced hide loading");
+  }
+}, 15000);
 
 function animate() {
   requestAnimationFrame(animate);
@@ -684,5 +707,5 @@ addEventListener("resize", () => {
   labelRenderer.setSize(innerWidth, innerHeight);
 });
 
-init();
+init().catch(err => showError(err.message + " | " + (err.stack || "").slice(0,200)));
 animate();
